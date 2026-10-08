@@ -18,6 +18,9 @@ pkgs.testers.runNixOSTest {
       environment.etc."shoko-secrets/admin-password".text = "s3cret \"quoted\" $pass\n";
       environment.etc."shoko-secrets/anidb-password".text = "zz-anidb-secret-value\n";
 
+      # DynamicUser: the folder only needs to be world-readable.
+      systemd.tmpfiles.rules = [ "d /srv/anime 0755 root root -" ];
+
       services.shoko.enable = true;
       services.shoko.bootstrap = {
         enable = true;
@@ -32,6 +35,12 @@ pkgs.testers.runNixOSTest {
         settings.Language.SeriesTitleLanguageOrder = [
           "en"
           "x-jat"
+        ];
+        importFolders = [
+          {
+            Name = "Anime";
+            Path = "/srv/anime";
+          }
         ];
       };
     };
@@ -55,6 +64,13 @@ pkgs.testers.runNixOSTest {
         assert settings["AniDb"]["Username"] == "anidb-user", settings["AniDb"]
         assert settings["Language"]["SeriesTitleLanguageOrder"] == ["en", "x-jat"], settings["Language"]
         assert settings["FirstRun"] is False
+
+        folders = json.loads(machine.succeed(f"curl -sf -H 'apikey: {key}' {api}/v3/ImportFolder"))
+        assert len(folders) == 1, folders
+        assert folders[0]["Path"] == "/srv/anime/", folders
+        assert folders[0]["Name"] == "Anime", folders
+        assert folders[0]["WatchForNewFiles"] is True, folders
+        assert folders[0]["DropFolderType"] == "None", folders
         return key
 
     machine.wait_for_unit("shoko-bootstrap.service", timeout=600)

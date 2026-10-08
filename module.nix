@@ -255,6 +255,18 @@ in
   };
 
   config = mkIf cfg.enable {
+    warnings =
+      lib.optional
+        (
+          lib.hasPrefix "http://" cfg.url
+          && !(lib.any (h: lib.hasInfix h cfg.url) [
+            "127.0.0.1"
+            "localhost"
+            "[::1]"
+          ])
+        )
+        "services.shoko.bootstrap.url (${cfg.url}) is plain HTTP and not loopback: the admin password, AniDB credentials, and API token will cross the network in cleartext. Use https:// or a secure tunnel.";
+
     systemd.services.shoko-bootstrap = {
       description = "Declarative Shoko Server setup";
       after = [ "shoko.service" ];

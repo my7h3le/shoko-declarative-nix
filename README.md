@@ -55,6 +55,14 @@ It is built on [nixflix](https://github.com/kiriwalawren/nixflix)'s [`mkSecureCu
                 "en"
               ];
             };
+            importFolders = [
+              {
+                Name = "Anime";
+                Path = "/mnt/media/anime";
+                WatchForNewFiles = true; # default
+                DropFolderType = "None"; # default; or Source, Destination, Both
+              }
+            ];
           };
         })
       ];
@@ -75,6 +83,7 @@ It runs as a oneshot after `shoko.service`, on every boot and every time the con
 3. It waits for `Started`.
 4. It signs in (`POST /api/auth`) as the admin with the key name `shoko-bootstrap`, and uses that key from then on.
 5. It applies every declared setting with `PATCH /api/v3/Settings`. Each one is a JSON Patch `replace`, so this is idempotent.
+6. It reconciles `importFolders` against `GET /api/v3/ImportFolder`, matching by path. Missing folders are added (`POST`), folders whose name, watch flag or drop type differ are updated (`PUT`), and unchanged ones are skipped.
 
 On an instance that is already set up, the wizard is skipped, and steps 3–5 bring the settings back in line with the config.
 
@@ -85,6 +94,8 @@ During setup mode only the AniDB credentials are sent. That matches what the Web
 - The admin password is only set on first run. If the password stored in Shoko no longer matches `user.password`, the unit fails with a clear message, and you'll need to change the password in the WebUI to match.
 - Removing a setting from `settings` does not reset it to its default.
 - `null` values and empty attrsets in `settings` are dropped.
+- Import folder paths must already exist and be readable by the Shoko service (which runs as a `DynamicUser`), and can't be nested inside one another. Shoko rejects them otherwise, and the unit fails with Shoko's error.
+- Removing a folder from `importFolders` doesn't delete it from Shoko. Changing a folder's `Path` adds a new folder rather than moving the old one.
 
 ## Testing
 

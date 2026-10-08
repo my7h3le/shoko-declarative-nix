@@ -64,6 +64,8 @@ let
     password = cfg.user.password;
   };
 
+  importFoldersJson = pkgs.writeText "shoko-import-folders.json" (builtins.toJSON cfg.importFolders);
+
   jsonHeaders = {
     "Content-Type" = "application/json";
   };
@@ -85,6 +87,14 @@ let
         method = "$1";
         headers = jsonHeaders;
         data = "$3";
+        extraArgs = ''-o "$RESP" -w '%{http_code}' '';
+      }}
+    )
+
+    auth_get() (
+      ${mkSecureCurl { _secret = tokenFile; } {
+        url = "$API/$1";
+        apiKeyHeader = "apikey";
         extraArgs = ''-o "$RESP" -w '%{http_code}' '';
       }}
     )
@@ -196,6 +206,28 @@ let
     echo "Applying settings..."
     expect_2xx "$(auth_send PATCH v3/Settings "$(${mkSettingsPatch "settings" allSettings})" || true)" "applying settings"
 
+    # Import folders are matched to existing ones by path (Shoko stores it with
+    # a trailing slash): missing ones are added, changed ones replaced, and
+    # undeclared ones left alone. Re-adding an existing path would fail.
+    echo "Reconciling import folders..."
+    expect_2xx "$(auth_get v3/ImportFolder || true)" "listing import folders"
+    existing=$(cat "$RESP")
+    ${jq} -c '.[] | .Path |= (sub("/*$"; "") + "/")' ${importFoldersJson} | while IFS= read -r folder; do
+      name=$(${jq} -r '.Name' <<<"$folder")
+      match=$(${jq} -c --argjson f "$folder" \
+        'first(.[] | select(.Path == $f.Path)) // empty' <<<"$existing")
+      if [ -z "$match" ]; then
+        echo "Adding import folder $name"
+        expect_2xx "$(auth_send POST v3/ImportFolder "$(${jq} -c '. + {ID: 0}' <<<"$folder")" || true)" \
+          "adding import folder $name"
+      elif [ "$(${jq} -n --argjson f "$folder" --argjson m "$match" \
+        '[$f.Name, $f.WatchForNewFiles, $f.DropFolderType] == [$m.Name, $m.WatchForNewFiles, $m.DropFolderType]')" != true ]; then
+        echo "Updating import folder $name"
+        expect_2xx "$(auth_send PUT v3/ImportFolder "$(${jq} -c --argjson m "$match" '. + {ID: $m.ID}' <<<"$folder")" || true)" \
+          "updating import folder $name"
+      fi
+    done
+
     rm -f "$RESP"
     echo "Shoko bootstrap complete"
   '';
@@ -244,6 +276,58 @@ in
           Language.SeriesTitleLanguageOrder = [ "x-jat" "en" ];
           AniDb.DownloadCharacters = true;
         }
+      '';
+    };
+
+    importFolders = mkOption {
+      type = types.listOf (
+        types.submodule {
+          options = {
+            Name = mkOption {
+              type = types.str;
+              description = "Display name of the import folder.";
+            };
+            Path = mkOption {
+              type = types.str;
+              description = ''
+                Absolute path of the folder on the Shoko host. It must already
+                exist, be readable by the Shoko service, and not be nested
+                inside (or contain) another import folder.
+              '';
+            };
+            WatchForNewFiles = mkOption {
+              type = types.bool;
+              default = true;
+              description = "Whether Shoko watches the folder for new files.";
+            };
+            DropFolderType = mkOption {
+              type = types.enum [
+                "None"
+                "Source"
+                "Destination"
+                "Both"
+              ];
+              default = "None";
+              description = "Whether the folder is a drop source, drop destination, both, or neither.";
+            };
+          };
+        }
+      );
+      default = [ ];
+      description = ''
+        Import folders, matched to existing ones by path. Missing folders are
+        added and changed ones updated on every run; folders not listed here
+        are left untouched.
+      '';
+      example = lib.literalExpression ''
+        [
+          {
+            Name = "Anime";
+            Path = "/mnt/storage/media/anime";
+            WatchForNewFiles = true;
+            DropFolderType = "None";
+          }
+        ]
       '';
     };
 

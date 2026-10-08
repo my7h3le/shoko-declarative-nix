@@ -1,0 +1,11 @@
+# Output of the Nix flake build
+result
+
+flake.lock
+.direnv/
+
+.env
+
+.DS_Store
+
+*.bundle
